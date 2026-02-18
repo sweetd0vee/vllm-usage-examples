@@ -125,6 +125,108 @@ pip install vllm
 
 Также нужен **Python 3.10–3.13** (Python 3.9 не поддерживается).
 
+### 3.6 Запуск vLLM в Docker
+
+Docker — удобный способ запустить vLLM без установки Python-окружения и драйверов в хост-систему (особенно на Windows, где нативный vLLM не собирается). Официальный образ — [vllm/vllm-openai](https://hub.docker.com/r/vllm/vllm-openai/tags) на Docker Hub.
+
+#### Требования
+
+- **Docker** (и при использовании GPU — **NVIDIA Container Toolkit** с `nvidia-docker2` или встроенной поддержкой `--gpus`).
+- Достаточно места для образа и кэша моделей (например, `~/.cache/huggingface`).
+
+#### NVIDIA GPU: базовый запуск
+
+```bash
+docker run --runtime nvidia --gpus all \
+    -v ~/.cache/huggingface:/root/.cache/huggingface \
+    --env "HF_TOKEN=$HF_TOKEN" \
+    -p 8000:8000 \
+    --ipc=host \
+    vllm/vllm-openai:latest \
+    --model Qwen/Qwen2.5-1.5B-Instruct
+```
+
+- **`--runtime nvidia --gpus all`** — доступ контейнера к GPU (нужен установленный [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)).
+- **`-v ~/.cache/huggingface:/root/.cache/huggingface`** — кэш моделей с Hugging Face в контейнере (модели не качаются заново при перезапуске).
+- **`HF_TOKEN`** — токен Hugging Face (для gated-моделей); можно не задавать для публичных моделей.
+- **`-p 8000:8000`** — порт OpenAI-совместимого API (по умолчанию 8000).
+- **`--ipc=host`** — общая память хоста (нужна для PyTorch и tensor parallel). Альтернатива: `--shm-size` с достаточным размером.
+- **`--model ...`** — имя или путь к модели; после образа можно передать любые [аргументы движка](https://docs.vllm.ai/en/stable/configuration/engine_args/) (например `--max-model-len`, `--tensor-parallel-size`).
+
+После запуска API доступен на `http://localhost:8000` (проверка: `curl http://localhost:8000/v1/models`).
+
+#### Windows (Docker Desktop)
+
+На Windows команда та же, но путь к кэшу лучше задать в формате Windows или общий каталог:
+
+```powershell
+docker run --runtime nvidia --gpus all `
+    -v ${env:USERPROFILE}\.cache\huggingface:/root/.cache/huggingface `
+    --env "HF_TOKEN=$env:HF_TOKEN" `
+    -p 8000:8000 `
+    --ipc=host `
+    vllm/vllm-openai:latest `
+    --model Qwen/Qwen2.5-1.5B-Instruct
+```
+
+В Docker Desktop нужно включить поддержку GPU (WSL2 backend + драйверы NVIDIA в WSL2, если используете GPU).
+
+#### Конкретная версия образа
+
+Вместо `latest` лучше зафиксировать тег по версии vLLM:
+
+```bash
+docker run ... vllm/vllm-openai:v0.11.0 --model <model_name>
+```
+
+Актуальные теги: [Docker Hub — vllm/vllm-openai](https://hub.docker.com/r/vllm/vllm-openai/tags).
+
+#### Локальная модель (без Hugging Face Hub)
+
+Смонтируйте каталог с моделью и укажите путь внутри контейнера:
+
+```bash
+docker run --runtime nvidia --gpus all \
+    -v /path/on/host/models:/models \
+    -p 8000:8000 \
+    --ipc=host \
+    vllm/vllm-openai:latest \
+    --model /models/MyLocalModel
+```
+
+#### Дополнительные аргументы движка
+
+Все [engine arguments](https://docs.vllm.ai/en/stable/configuration/engine_args/) передаются после имени образа:
+
+```bash
+docker run ... vllm/vllm-openai:latest \
+    --model Qwen/Qwen2.5-1.5B-Instruct \
+    --max-model-len 4096 \
+    --tensor-parallel-size 2
+```
+
+#### Сборка образа из исходников (NVIDIA)
+
+Если нужна своя сборка (например, другой CUDA или патчи):
+
+```bash
+# Клонировать репозиторий vLLM, затем:
+DOCKER_BUILDKIT=1 docker build . \
+    --target vllm-openai \
+    --tag vllm/vllm-openai \
+    --file docker/Dockerfile
+```
+
+Для сборки под текущий тип GPU (ускорение):  
+`--build-arg torch_cuda_arch_list=""`
+
+Подробнее: [Using Docker — vLLM](https://docs.vllm.ai/en/stable/deployment/docker.html).
+
+#### AMD ROCm и Intel XPU
+
+- **AMD:** образ [vllm/vllm-openai-rocm](https://hub.docker.com/r/vllm/vllm-openai-rocm/tags), нужны флаги `--device /dev/kfd`, `--device /dev/dri`, `--group-add=video` и др. (см. [официальную документацию](https://docs.vllm.ai/en/stable/deployment/docker.html)).
+- **Intel XPU:** образы [intel/vllm](https://hub.docker.com/r/intel/vllm/tags), свои флаги для устройств.
+
 ---
 
 ## 4. Как использовать
@@ -269,6 +371,7 @@ FlashInfer не входит в стандартные wheel’ы — его н�
 - [Официальная документация](https://docs.vllm.ai/en/stable/)
 - [Quickstart](https://docs.vllm.ai/en/stable/getting_started/quickstart/)
 - [Installation](https://docs.vllm.ai/en/stable/getting_started/installation/)
+- [Using Docker](https://docs.vllm.ai/en/stable/deployment/docker.html)
 - [Supported models](https://docs.vllm.ai/en/stable/models/supported_models/)
 - [User Guide (usage)](https://docs.vllm.ai/en/stable/usage/)
 - [OpenAI-compatible server](https://docs.vllm.ai/en/stable/serving/openai_compatible_server/)
@@ -284,8 +387,14 @@ FlashInfer не входит в стандартные wheel’ы — его н�
 uv venv --python 3.12 --seed && source .venv/bin/activate
 uv pip install vllm --torch-backend=auto
 
-# Сервер
+# Сервер (локально)
 vllm serve <model_name_or_path> [--port 8000] [--host 0.0.0.0]
+
+# Сервер в Docker (NVIDIA GPU)
+docker run --runtime nvidia --gpus all \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  -e HF_TOKEN=$HF_TOKEN -p 8000:8000 --ipc=host \
+  vllm/vllm-openai:latest --model <model_name_or_path>
 
 # Справка
 vllm --help

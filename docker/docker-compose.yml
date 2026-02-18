@@ -1,0 +1,36 @@
+# vLLM OpenAI-совместимый сервер в Docker
+# Запуск: docker-compose-up.bat  Остановка: docker-compose-down.bat
+
+services:
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-openai
+    ports:
+      - "8000:8000"
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    volumes:
+      # Кэш Hugging Face (модели сохраняются между перезапусками)
+      - huggingface_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Общая память для PyTorch (на Windows ipc: host не поддерживается — используем shm_size)
+    shm_size: "8gb"
+    # Модель и аргументы движка (можно переопределить в .env через VLLM_MODEL)
+    command: >
+      --model ${VLLM_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  huggingface_cache:
